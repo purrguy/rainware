@@ -1,12 +1,4 @@
 --[[
-    RAINWARE UI LIBRARY
-    ====================
-    Extracted from the RainWare game script (v1.0.0).
-
-    A reusable, self-contained UI library based on the original RainWare
-    interface.  Builds a draggable panel with tabs, search, toggles, sliders,
-    dropdowns, notifications, and a mobile joystick.
-
     Usage:
         local UI = require(script.RainWareUI)
         local ui = UI:Create(Players.LocalPlayer.PlayerGui)
