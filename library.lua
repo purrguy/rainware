@@ -754,15 +754,26 @@ function RainWare:CreateWindow(cfg)
 		function tab:CreateDropdown(d)
 			d = d or {}
 			local flag = d.Flag
+			local multi = d.Multi == true
+			local searchable = d.Search == true or d.Searchable == true
 			local values = {}
 			for _, v in ipairs(d.Values or d.Content or {}) do
 				table.insert(values, tostring(v))
 			end
-			local value = d.Default
-			if value == nil or value == "" then
-				value = values[1]
+
+			local selected = {}
+			local value = ""
+			if multi then
+				for _, v in ipairs(d.Default or {}) do
+					selected[tostring(v)] = true
+				end
+			else
+				value = d.Default
+				if value == nil or value == "" then
+					value = values[1]
+				end
+				value = tostring(value or "")
 			end
-			value = tostring(value or "")
 
 			local card = mk("Frame", {
 				Size = UDim2.new(1, 0, 0, 28),
@@ -782,7 +793,7 @@ function RainWare:CreateWindow(cfg)
 			})
 			local titleLbl = label(card, tostring(d.Title or "Dropdown"), UDim2.new(1, -120, 0, 28), COL.text, FONT, 11)
 			titleLbl.Position = UDim2.fromOffset(10, 0)
-			local valueLbl = label(card, value, UDim2.new(0, 96, 0, 28), COL.accent, FONTS, 10)
+			local valueLbl = label(card, "", UDim2.new(0, 96, 0, 28), COL.accent, FONTS, 10)
 			valueLbl.Position = UDim2.new(1, -112, 0, 0)
 			valueLbl.TextXAlignment = Enum.TextXAlignment.Right
 			valueLbl.TextTruncate = Enum.TextTruncate.AtEnd
@@ -810,71 +821,153 @@ function RainWare:CreateWindow(cfg)
 			mk("UIListLayout", { Padding = UDim.new(0, 2), SortOrder = Enum.SortOrder.LayoutOrder }, list)
 			pad(list, 4, 4, 4, 4)
 
+			local searchBox
+			if searchable then
+				searchBox = mk("TextBox", {
+					Name = "Search",
+					Size = UDim2.new(1, 0, 0, 20),
+					BackgroundColor3 = COL.bg,
+					BorderSizePixel = 0,
+					Text = "",
+					PlaceholderText = "Search...",
+					Font = FONT,
+					TextSize = 10,
+					TextColor3 = COL.text,
+					PlaceholderColor3 = COL.dim,
+					TextXAlignment = Enum.TextXAlignment.Left,
+					ClearTextOnFocus = false,
+					LayoutOrder = 0,
+					Parent = list,
+				})
+				corner(searchBox, 3)
+				pad(searchBox, 6, 6, 0, 0)
+			end
+
 			win._dropdownLists = win._dropdownLists or {}
 			table.insert(win._dropdownLists, list)
 
-			local api = { Flag = flag, Title = d.Title }
+			local api = { Flag = flag, Title = d.Title, Multi = multi }
 			api._list = list
 			api._place = function() end
 
-			local function rebuild()
-				for _, c in ipairs(list:GetChildren()) do
-					if c:IsA("TextButton") then c:Destroy() end
+			local function selectedList()
+				local out = {}
+				for _, v in ipairs(values) do
+					if selected[v] then
+						table.insert(out, v)
+					end
 				end
-				for i, v in ipairs(values) do
-					local b = mk("TextButton", {
-						Size = UDim2.new(1, 0, 0, 20),
-						BackgroundColor3 = COL.bg,
-						Text = v,
-						Font = FONT,
-						TextSize = 10,
-						TextColor3 = v == value and COL.accent or COL.dim,
-						TextXAlignment = Enum.TextXAlignment.Left,
-						AutoButtonColor = false,
-						LayoutOrder = i,
-						Parent = list,
-					})
-					corner(b, 3)
-					pad(b, 8, 6, 0, 0)
-					b.MouseEnter:Connect(function()
-						b.BackgroundColor3 = COL.card
-					end)
-					b.MouseLeave:Connect(function()
-						b.BackgroundColor3 = COL.bg
-					end)
-					b.Activated:Connect(function()
-						api:Set(v)
-						api:Close()
-					end)
+				return out
+			end
+
+			local function summarize()
+				if not multi then
+					return value
+				end
+				local n = 0
+				local last = nil
+				for _, v in ipairs(values) do
+					if selected[v] then
+						n = n + 1
+						last = v
+					end
+				end
+				if n == 0 then
+					return "None"
+				end
+				if n == 1 then
+					return tostring(last)
+				end
+				return tostring(n) .. " selected"
+			end
+
+			local function rowVisible(v)
+				if not searchBox then
+					return true
+				end
+				local q = string.lower(searchBox.Text or "")
+				if q == "" then
+					return true
+				end
+				return string.find(string.lower(v), q, 1, true) ~= nil
+			end
+
+			local function visibleCount()
+				local n = 0
+				for _, v in ipairs(values) do
+					if rowVisible(v) then
+						n = n + 1
+					end
+				end
+				return n
+			end
+
+			local function updateHeight()
+				local rows = math.clamp(visibleCount(), 1, 6)
+				local height = rows * 22 + 8 + (searchBox and 24 or 0)
+				if list.Visible then
+					list.Size = UDim2.new(1, 0, 0, height)
+					card.Size = UDim2.new(1, 0, 0, 31 + height)
 				end
 			end
 
-			local function setOpen(open)
-				local rows = math.min(math.max(#values, 1), 6)
-				local height = rows * 22 + 8
-				list.Visible = open
-				arrow.Text = open and "^" or "v"
-				arrow.TextColor3 = open and COL.accent or COL.dim
-				list.Size = UDim2.new(1, 0, 0, open and height or 0)
-				card.Size = UDim2.new(1, 0, 0, open and (31 + height) or 28)
+			local function notifyChanged()
+				valueLbl.Text = summarize()
+				local out = multi and selectedList() or value
+				if flag then
+					RainWare.Flags[flag] = out
+				end
+				if type(d.Callback) == "function" then
+					pcall(d.Callback, out)
+				end
 			end
+
+			local rebuild
+			local setOpen
 
 			function api:Get()
+				if multi then
+					return selectedList()
+				end
 				return value
 			end
-			function api:Set(v)
-				value = tostring(v)
-				valueLbl.Text = value
-				if flag then RainWare.Flags[flag] = value end
-				if type(d.Callback) == "function" then pcall(d.Callback, value) end
+
+			function api:Toggle(v)
+				if not multi then
+					return api:Set(v)
+				end
+				v = tostring(v)
+				if selected[v] then
+					selected[v] = nil
+				else
+					selected[v] = true
+				end
 				rebuild()
+				notifyChanged()
 			end
+
+			function api:Set(v)
+				if multi then
+					selected = {}
+					if type(v) == "table" then
+						for _, item in ipairs(v) do
+							selected[tostring(item)] = true
+						end
+					end
+					rebuild()
+				else
+					value = tostring(v)
+					rebuild()
+				end
+				notifyChanged()
+			end
+
 			function api:SetValues(newValues)
 				values = {}
 				for _, v in ipairs(newValues or {}) do
 					table.insert(values, tostring(v))
 				end
-				if #values > 0 then
+				if not multi then
 					local found = false
 					for _, v in ipairs(values) do
 						if v == value then
@@ -883,22 +976,97 @@ function RainWare:CreateWindow(cfg)
 						end
 					end
 					if not found then
-						api:Set(values[1])
-					else
-						rebuild()
+						value = values[1] or ""
 					end
-				else
-					rebuild()
 				end
-				if list.Visible then
-					setOpen(true)
+				rebuild()
+				updateHeight()
+				valueLbl.Text = summarize()
+				if flag then
+					RainWare.Flags[flag] = multi and selectedList() or value
 				end
 			end
+
 			function api:Open()
 				setOpen(true)
 			end
+
 			function api:Close()
 				setOpen(false)
+			end
+
+			function api:GetValues()
+				local copy = {}
+				for _, v in ipairs(values) do
+					table.insert(copy, v)
+				end
+				return copy
+			end
+
+			rebuild = function()
+				for _, c in ipairs(list:GetChildren()) do
+					if c:IsA("TextButton") then
+						c:Destroy()
+					end
+				end
+				local order = 1
+				for _, v in ipairs(values) do
+					if rowVisible(v) then
+						local picked = multi and selected[v] or (v == value)
+						local text = v
+						if multi then
+							text = (picked and "[x] " or "[ ] ") .. v
+						end
+						local b = mk("TextButton", {
+							Size = UDim2.new(1, 0, 0, 20),
+							BackgroundColor3 = picked and COL.card or COL.bg,
+							Text = text,
+							Font = FONT,
+							TextSize = 10,
+							TextColor3 = picked and COL.accent or COL.dim,
+							TextXAlignment = Enum.TextXAlignment.Left,
+							AutoButtonColor = false,
+							LayoutOrder = order,
+							Parent = list,
+						})
+						order = order + 1
+						corner(b, 3)
+						pad(b, 8, 6, 0, 0)
+						b.MouseEnter:Connect(function()
+							b.BackgroundColor3 = COL.card
+						end)
+						b.MouseLeave:Connect(function()
+							b.BackgroundColor3 = picked and COL.card or COL.bg
+						end)
+						b.Activated:Connect(function()
+							if multi then
+								api:Toggle(v)
+							else
+								api:Set(v)
+								setOpen(false)
+							end
+						end)
+					end
+				end
+			end
+
+			function setOpen(open)
+				list.Visible = open
+				arrow.Text = open and "^" or "v"
+				arrow.TextColor3 = open and COL.accent or COL.dim
+				if open then
+					updateHeight()
+				else
+					list.Size = UDim2.new(1, 0, 0, 0)
+					card.Size = UDim2.new(1, 0, 0, 28)
+				end
+			end
+
+			if searchBox then
+				searchBox:GetPropertyChangedSignal("Text"):Connect(function()
+					rebuild()
+					updateHeight()
+				end)
 			end
 
 			pick.Activated:Connect(function()
@@ -906,7 +1074,9 @@ function RainWare:CreateWindow(cfg)
 			end)
 
 			UIS.InputBegan:Connect(function(input)
-				if not list.Visible then return end
+				if not list.Visible then
+					return
+				end
 				if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then
 					return
 				end
@@ -927,9 +1097,10 @@ function RainWare:CreateWindow(cfg)
 			end)
 
 			rebuild()
+			valueLbl.Text = summarize()
 			setOpen(false)
 			if flag then
-				RainWare.Flags[flag] = value
+				RainWare.Flags[flag] = multi and selectedList() or value
 				RainWare.Options[flag] = api
 			end
 			return api
