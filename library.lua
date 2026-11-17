@@ -66,6 +66,7 @@ local Settings = {
 	Rain = true,
 	Puddles = true,
 	Performance = false,
+	Motion = true,
 	Accent = 1,
 }
 
@@ -113,6 +114,9 @@ local function loadSettings()
 	end
 	if type(data.Puddles) == "boolean" then
 		Settings.Puddles = data.Puddles
+	end
+	if type(data.Motion) == "boolean" then
+		Settings.Motion = data.Motion
 	end
 	if type(data.Performance) == "boolean" then
 		Settings.Performance = data.Performance
@@ -339,6 +343,10 @@ local function callSafe(fn, ...)
 	local ok, err = pcall(fn, ...)
 	if not ok then
 		RainWare:Notify({ Title = "Error", Content = tostring(err), Duration = 5 })
+		local w = RainWare._activeWindow
+		if w then
+			w:Shake(4, 0.35)
+		end
 	end
 end
 
@@ -392,6 +400,19 @@ end
 ----------------------------------------------------------------------------
 -- Icons: Lucide sprite sheet when available, drawn fallbacks otherwise
 ----------------------------------------------------------------------------
+
+-- Small rotation wobble for clicked elements. Skipped when motion is off.
+local function wobble(obj, amp)
+	if Settings.Performance or not Settings.Motion then
+		return
+	end
+	task.spawn(function()
+		for _, r in ipairs({ amp, -amp * 0.7, amp * 0.35, 0 }) do
+			pcall(anim, obj, { Rotation = r }, 0.06)
+			task.wait(0.06)
+		end
+	end)
+end
 
 local ICON_NAMES = {
 	"settings", "minus", "x", "chevron-down", "chevron-up", "chevron-right",
@@ -566,6 +587,24 @@ local function stepFx(fx, dt)
 	end
 end
 
+-- Window shake: a decaying random offset applied to the window position.
+local function stepShake(win, dt)
+	local s = win._shake
+	if not s then
+		return
+	end
+	s.t = s.t + dt
+	if s.t >= s.dur or Settings.Performance then
+		win._shake = nil
+		win:_place()
+		return
+	end
+	local k = 1 - s.t / s.dur
+	local ox = (math.random() * 2 - 1) * s.amp * k
+	local oy = (math.random() * 2 - 1) * s.amp * k * 0.6
+	win._wrap.Position = UDim2.fromOffset(math.floor(win._x + win._W / 2 + ox), math.floor(win._y + win._H / 2 + oy))
+end
+
 local function startLoop()
 	if loopConn then
 		return
@@ -573,6 +612,7 @@ local function startLoop()
 	loopConn = RunService.Heartbeat:Connect(function(dt)
 		for _, fx in ipairs(fxList) do
 			if fx.win._state == "open" then
+				stepShake(fx.win, dt)
 				stepFx(fx, dt)
 			end
 		end
@@ -654,6 +694,7 @@ local function makeButton(parent, cfg)
 	end)
 	hit.Activated:Connect(function()
 		callSafe(cfg.Callback)
+		wobble(frame, 2.5)
 	end)
 
 	local api = { Frame = frame }
@@ -735,6 +776,7 @@ local function makeToggle(parent, cfg)
 	end
 	hit.Activated:Connect(function()
 		api:Set(not state)
+		wobble(track, 4)
 	end)
 
 	render(true)
@@ -1838,6 +1880,13 @@ function RainWare:Minimize()
 	end
 end
 
+function RainWare:Shake(amount, duration)
+	if Settings.Performance or not Settings.Motion or self._state ~= "open" then
+		return
+	end
+	self._shake = { amp = amount or 4, dur = duration or 0.35, t = 0 }
+end
+
 function RainWare:Restore()
 	self:Toggle(true)
 end
@@ -2290,6 +2339,17 @@ RainWare._buildSettings = function(win)
 		end,
 	})
 	perf.Frame.LayoutOrder = nextOrder()
+	local motion = makeToggle(list, {
+		Title = "Motion effects",
+		Description = "Shake on errors, wobble on clicks",
+		Icon = "rotate-ccw",
+		Default = Settings.Motion,
+		Callback = function(v)
+			Settings.Motion = v
+			saveSettings()
+		end,
+	})
+	motion.Frame.LayoutOrder = nextOrder()
 
 	heading("LOOK")
 	local accentRow = rowCard(list, 50)
@@ -2405,6 +2465,9 @@ function RainWare:Notify(cfg)
 	anim(cardStroke, { Transparency = 0.6 }, 0.2)
 	anim(titleL, { TextTransparency = 0 }, 0.2)
 	anim(bodyL, { TextTransparency = 0 }, 0.2)
+	task.delay(0.25, function()
+		wobble(card, 2)
+	end)
 
 	notifQueue[#notifQueue + 1] = card
 	while #notifQueue > 5 do
