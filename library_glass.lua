@@ -1245,7 +1245,7 @@ function RainWare:CreateWindow(cfg)
 	end
 	local H = cfg.Size and cfg.Size.Y.Offset or 0
 	if H <= 0 then
-		H = math.clamp(math.floor(vp.Y * 0.62), 430, 520)
+		H = math.clamp(math.floor(vp.Y * 0.5), 360, 400)
 	end
 	W = math.min(W, vp.X - 24)
 	H = math.min(H, vp.Y - 24)
