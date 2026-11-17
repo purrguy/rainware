@@ -1549,14 +1549,27 @@ function RainWare:CreateWindow(cfg)
 	}, panel)
 	corner(sidebar, 16)
 	stroke(sidebar, THEME.edge, 1, 0.82)
-	new("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, sidebar)
+	local tabScroll = new("ScrollingFrame", {
+		Name = "TabScroll",
+		Size = UDim2.fromScale(1, 1),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		ScrollBarThickness = 3,
+		ScrollBarImageColor3 = ACC.a,
+		ScrollBarImageTransparency = 0.35,
+		CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ScrollingDirection = Enum.ScrollingDirection.Y,
+		ElasticBehavior = Enum.ElasticBehavior.WhenScrollable,
+	}, sidebar)
+	new("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }, tabScroll)
 	new("UIPadding", {
 		PaddingTop = UDim.new(0, 8),
 		PaddingLeft = UDim.new(0, 8),
-		PaddingRight = UDim.new(0, 8),
+		PaddingRight = UDim.new(0, 10),
 		PaddingBottom = UDim.new(0, 8),
-	}, sidebar)
-	win._sidebar = sidebar
+	}, tabScroll)
+	win._sidebar = tabScroll
 
 	local content = new("Frame", {
 		Name = "Content",
@@ -1908,6 +1921,7 @@ function RainWare:CreateTab(tabCfg)
 		BorderSizePixel = 0,
 		Text = "",
 		AutoButtonColor = false,
+		ClipsDescendants = true,
 		LayoutOrder = tabCfg.Order or index,
 	}, self._sidebar)
 	corner(btn, 11)
