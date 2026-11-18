@@ -555,33 +555,82 @@ local SLANT = math.tan(math.rad(12))
 local fxList = {}
 local loopConn = nil
 
+local PUDDLE_COUNT = 24
+local PUDDLE_LIFE = 5
+local PUDDLE_CHANCE = 0.12
+
+local function spawnPuddle(fx, x, y)
+	local p
+	for _, q in ipairs(fx.puddles) do
+		if not q.alive then
+			p = q
+			break
+		end
+	end
+	if not p then
+		p = fx.puddles[fx.nextPuddle]
+		fx.nextPuddle = fx.nextPuddle % #fx.puddles + 1
+	end
+	p.alive = true
+	p.age = 0
+	p.life = PUDDLE_LIFE * (0.7 + 0.6 * math.random())
+	p.w = 36 + math.random() * 44
+	p.body.Position = UDim2.fromOffset(x, y)
+	p.body.Visible = true
+	for _, r in ipairs(p.rings) do
+		r.frame.Position = UDim2.fromOffset(x, y)
+		r.frame.Visible = true
+	end
+end
+
+local function stepPuddles(fx, dt)
+	for _, p in ipairs(fx.puddles) do
+		if p.alive then
+			p.age = p.age + dt
+			if p.age >= p.life then
+				p.alive = false
+				p.body.Visible = false
+				for _, r in ipairs(p.rings) do
+					r.frame.Visible = false
+				end
+			else
+				local grow = math.min(1, p.age / 0.5)
+				local fade = 1 - math.max(0, (p.age - p.life * 0.6) / (p.life * 0.4))
+				p.body.Size = UDim2.fromOffset(p.w * grow, 5)
+				p.body.BackgroundTransparency = 1 - 0.45 * fade
+				for _, r in ipairs(p.rings) do
+					local k = (p.age / r.period + r.phase) % 1
+					r.frame.Size = UDim2.fromOffset(p.w * grow * (0.2 + 1.1 * k), 2 + 8 * k)
+					r.stroke.Transparency = 0.25 + 0.75 * k
+				end
+			end
+		end
+	end
+end
+
 local function stepFx(fx, dt)
 	if Settings.Performance then
 		return
 	end
 	fx.time = fx.time + dt
+	stepPuddles(fx, dt)
 	if Settings.Rain then
 		local size = fx.rainLayer.AbsoluteSize
 		local w, h = size.X, size.Y
 		if w > 0 and h > 0 then
+			local floorY = h - 8
 			for _, d in ipairs(fx.drops) do
 				d.y = d.y + d.v * dt
 				d.x = d.x - d.v * SLANT * dt
-				if d.y > h + d.len then
+				if d.y >= floorY then
+					if Settings.Puddles and math.random() < PUDDLE_CHANCE then
+						spawnPuddle(fx, d.x, floorY)
+					end
 					d.y = -d.len - math.random() * h * 0.5
 					d.x = math.random() * (w + h * SLANT)
 					d.v = 170 + math.random() * 170
 				end
 				d.frame.Position = UDim2.fromOffset(d.x, d.y)
-			end
-		end
-	end
-	if Settings.Puddles then
-		for _, p in ipairs(fx.puddles) do
-			for _, r in ipairs(p.rings) do
-				local k = (fx.time / r.period + r.phase) % 1
-				r.frame.Size = UDim2.fromOffset(p.w * (0.2 + 1.1 * k), 2 + 8 * k)
-				r.stroke.Transparency = 0.25 + 0.75 * k
 			end
 		end
 	end
@@ -1401,6 +1450,7 @@ function RainWare:CreateWindow(cfg)
 		BackgroundColor3 = THEME.white,
 		BorderSizePixel = 0,
 	}, panel)
+	corner(floorGlow, 20)
 	local floorGrad = new("UIGradient", {
 		Color = ColorSequence.new(ACC.a, ACC.a),
 		Transparency = NumberSequence.new(1, 0.78),
@@ -1452,17 +1502,14 @@ function RainWare:CreateWindow(cfg)
 		fx.drops[i] = drop
 	end
 
-	for i, s in ipairs({ 0.16, 0.4, 0.64, 0.86 }) do
-		local x = W * s + (math.random() - 0.5) * 24
-		local y = H - 8
-		local w = 70 + math.random() * 40
+	for i = 1, PUDDLE_COUNT do
 		local body = new("Frame", {
 			AnchorPoint = Vector2.new(0.5, 0.5),
-			Position = UDim2.fromOffset(x, y),
-			Size = UDim2.fromOffset(w, 5),
+			Size = UDim2.fromOffset(0, 5),
 			BackgroundColor3 = ACC.a,
 			BackgroundTransparency = 0.55,
 			BorderSizePixel = 0,
+			Visible = false,
 		}, puddleLayer)
 		corner(body, 99)
 		live(body, function(a)
@@ -1472,10 +1519,10 @@ function RainWare:CreateWindow(cfg)
 		for r = 1, 2 do
 			local ring = new("Frame", {
 				AnchorPoint = Vector2.new(0.5, 0.5),
-				Position = UDim2.fromOffset(x, y),
-				Size = UDim2.fromOffset(w * 0.3, 2),
+				Size = UDim2.fromOffset(2, 2),
 				BackgroundTransparency = 1,
 				BorderSizePixel = 0,
+				Visible = false,
 			}, puddleLayer)
 			corner(ring, 99)
 			rings[r] = {
@@ -1485,8 +1532,9 @@ function RainWare:CreateWindow(cfg)
 				phase = (r - 1) * 0.5,
 			}
 		end
-		fx.puddles[i] = { w = w, rings = rings, body = body }
+		fx.puddles[i] = { alive = false, age = 0, life = 1, w = 1, body = body, rings = rings }
 	end
+	fx.nextPuddle = 1
 	fxList[#fxList + 1] = fx
 	win._fx = fx
 
@@ -1820,9 +1868,12 @@ function RainWare:_applyEffects()
 		d.frame.Visible = showRain
 	end
 	for _, p in ipairs(fx.puddles) do
-		p.body.Visible = showPuddles
+		p.body.Visible = false
+		if not showPuddles then
+			p.alive = false
+		end
 		for _, r in ipairs(p.rings) do
-			r.frame.Visible = showPuddles
+			r.frame.Visible = false
 		end
 	end
 	self._glow.Visible = not Settings.Performance
@@ -1857,7 +1908,13 @@ function RainWare:Toggle(visible)
 		self._state = "hidden"
 		self:CloseDropdowns()
 		self._pill.Visible = false
-		self._wrap.Visible = false
+		anim(self._scale, { Scale = 0.9 }, 0.16)
+		task.delay(0.17, function()
+			if self._state == "hidden" then
+				self._wrap.Visible = false
+				self._scale.Scale = 1
+			end
+		end)
 	end
 end
 
@@ -1869,7 +1926,13 @@ function RainWare:Minimize()
 	self:CloseDropdowns()
 	self._px = self._x
 	self._py = self._y
-	self._wrap.Visible = false
+	anim(self._scale, { Scale = 0.85 }, 0.16)
+	task.delay(0.17, function()
+		if self._state == "minimized" then
+			self._wrap.Visible = false
+			self._scale.Scale = 1
+		end
+	end)
 	self._pill.Position = UDim2.fromOffset(math.floor(self._px), math.floor(self._py))
 	self._pill.Visible = true
 	if Settings.Performance then
@@ -2071,7 +2134,27 @@ function RainWare:CreateTab(tabCfg)
 			anim(glowBg, { BackgroundTransparency = 1 }, 0.15)
 		end
 	end)
+	local suppressClick = false
+	btn.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			suppressClick = false
+			local startY = input.Position.Y
+			local moved = false
+			beginDrag(function(p)
+				if not moved and math.abs(p.Y - startY) < 6 then
+					return
+				end
+				moved = true
+				suppressClick = true
+				self:_moveTab(tab, p.Y)
+			end)
+		end
+	end)
 	btn.Activated:Connect(function()
+		if suppressClick then
+			suppressClick = false
+			return
+		end
 		self:SelectTab(tab.Index)
 	end)
 
@@ -2130,21 +2213,30 @@ function RainWare:CreateTab(tabCfg)
 		})
 
 		local body = new("Frame", {
-			Size = UDim2.new(1, 0, 0, 0),
-			AutomaticSize = Enum.AutomaticSize.Y,
-			BackgroundTransparency = 1,
-			BorderSizePixel = 0,
-			LayoutOrder = 2,
-		}, section)
-		new("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }, body)
-		new("UIPadding", { PaddingTop = UDim.new(0, 2), PaddingBottom = UDim.new(0, 4) }, body)
+	Size = UDim2.new(1, 0, 0, 0),
+	BackgroundTransparency = 1,
+	BorderSizePixel = 0,
+	ClipsDescendants = true,
+	LayoutOrder = 2,
+}, section)
+local bodyLayout = new("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }, body)
+new("UIPadding", { PaddingTop = UDim.new(0, 2), PaddingBottom = UDim.new(0, 4) }, body)
 
-		local open = true
-		header.Activated:Connect(function()
-			open = not open
-			body.Visible = open
-			anim(chev, { Rotation = open and 0 or -90 }, 0.18)
-		end)
+local open = true
+local function fit()
+	return bodyLayout.AbsoluteContentSize.Y + 6
+end
+body.Size = UDim2.new(1, 0, 0, fit())
+bodyLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+	if open then
+		body.Size = UDim2.new(1, 0, 0, fit())
+	end
+end)
+header.Activated:Connect(function()
+	open = not open
+	anim(body, { Size = UDim2.new(1, 0, 0, open and fit() or 0) }, 0.25, Enum.EasingStyle.Quint)
+	anim(chev, { Rotation = open and 0 or -90 }, 0.18)
+end)
 
 		self._target = body
 		self._orders[body] = 0
@@ -2206,7 +2298,12 @@ function RainWare:SelectTab(index)
 	for i, tab in ipairs(self._tabs) do
 		local active = i == index
 		tab._active = active
+		local wasVisible = tab._frame.Visible
 		tab._frame.Visible = active
+		if active and not wasVisible and not Settings.Performance then
+			tab._frame.Position = UDim2.fromOffset(22, 0)
+			anim(tab._frame, { Position = UDim2.fromOffset(0, 0) }, 0.28, Enum.EasingStyle.Quint)
+		end
 		anim(tab._glow, { BackgroundTransparency = active and 0 or 1 }, 0.2)
 		anim(tab._bar, { BackgroundTransparency = active and 0 or 1 }, 0.2)
 		tab._label.TextColor3 = active and THEME.text or THEME.dim
@@ -2215,6 +2312,36 @@ function RainWare:SelectTab(index)
 		end
 	end
 	self._current = index
+end
+
+function RainWare:_moveTab(tab, mouseY)
+	local list = self._tabs
+	local target = #list
+	for i, t in ipairs(list) do
+		local b = t._button
+		if mouseY < b.AbsolutePosition.Y + b.AbsoluteSize.Y / 2 then
+			target = i
+			break
+		end
+	end
+	local cur = nil
+	for i, t in ipairs(list) do
+		if t == tab then
+			cur = i
+		end
+	end
+	if not cur or target == cur then
+		return
+	end
+	table.remove(list, cur)
+	table.insert(list, target, tab)
+	for i, t in ipairs(list) do
+		t.Index = i
+		t._button.LayoutOrder = i
+		if t._active then
+			self._current = i
+		end
+	end
 end
 
 function RainWare:SelectTabByTitle(title)
@@ -2315,7 +2442,7 @@ RainWare._buildSettings = function(win)
 	rain.Frame.LayoutOrder = nextOrder()
 	local puddles = makeToggle(list, {
 		Title = "Puddles",
-		Description = "Ripples along the bottom edge",
+		Description = "Ripples where the rain lands",
 		Icon = "waves-horizontal",
 		Default = Settings.Puddles,
 		Callback = function(v)
